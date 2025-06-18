@@ -13,5 +13,21 @@ struct Huggin_MACOSApp: App {
         WindowGroup {
             ContentView()
         }
+        .windowStyle(.hiddenTitleBar)
+        .windowResizability(.contentSize)
+#if os(macOS)
+        MenuBarExtra {
+            Button("Show Huginn") {
+                NSApp.activate(ignoringOtherApps: true)
+            }
+            Divider()
+            Button("Quit") {
+                NSApp.terminate(nil)
+            }
+        } label: {
+            Image("icon_32x32")
+        }
+        .menuBarExtraStyle(.window)
+#endif
     }
 }
