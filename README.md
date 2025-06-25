@@ -1,401 +1,135 @@
-# Huginn ODIN Agent Integration Module
+# Huginn macOS Agent
 
-A comprehensive TypeScript-based integration module for connecting Huginn macOS agents with the ODIN management platform via Supabase. This module provides secure authentication, task execution, telemetry reporting, and system management capabilities.
+A comprehensive macOS system management agent with ODIN integration for remote administration, monitoring, and automation.
 
-## Features
+## Project Structure
 
-### 🔐 Authentication & Token Management
-- Secure JWT-based authentication with automatic token refresh
-- Local keychain storage for credentials using macOS Keychain
-- Automatic re-enrollment when tokens expire
-- 5-minute buffer for token refresh to prevent expiration
+This repository contains two main components:
 
-### 🚀 Task Execution Engine
-- **Command Execution**: Run shell commands with security safeguards
-- **Script Execution**: Execute bash, Python, Node.js, and other scripts
-- **Software Installation**: Support for Homebrew, Mac App Store, DMG, and PKG
-- **Policy Application**: Security, configuration, and compliance policies
-- Built-in safety mechanisms to prevent dangerous operations
+### 1. Swift macOS Application (`Huggin-MACOS/`)
+- **Native macOS app** built with SwiftUI
+- **System monitoring** - Hardware, software, security status
+- **Task execution** - Remote script and command execution
+- **ODIN integration** - Secure agent communication with management platform
+- **User interface** - Modern macOS-native dashboard and controls
 
-### 📊 Comprehensive Telemetry
-- **Hardware**: CPU, memory, storage, GPU, USB devices, network interfaces
-- **Software**: OS info, installed applications, running services and processes
-- **Security**: Firewall status, disk encryption, antivirus, updates
-- **Network**: Interfaces, connections, usage statistics, WiFi info
-- **Performance**: System load, uptime, alerts, resource utilization
+### 2. TypeScript Integration Module (`src/`, `package.json`)
+- **ODIN Agent Integration** - TypeScript/Node.js module for agent communication
+- **Authentication** - JWT-based secure authentication with token management
+- **Task execution engine** - Command, script, and software installation capabilities  
+- **Telemetry collection** - Comprehensive system metrics and reporting
+- **API bridge** - Interface between Swift app and ODIN management platform
 
-### 🔄 Real-time Communication
-- Automatic task polling (configurable interval)
-- Exponential backoff retry logic for network failures
-- 401 error handling with automatic token refresh
-- Comprehensive error logging and debugging
+## Key Features
 
-### 📝 Advanced Logging
-- Structured JSON logging with multiple levels (DEBUG, INFO, WARN, ERROR)
-- Automatic log rotation (10MB max file size)
-- Export functionality for support and debugging
-- Console and file output with configurable levels
+### 🖥️ System Management
+- Real-time hardware and software monitoring
+- Security status tracking (firewall, encryption, updates)
+- Application inventory and management
+- System health diagnostics
 
-## Installation
+### 🔐 Security & Authentication
+- Secure JWT-based authentication
+- macOS Keychain credential storage
+- Automatic token refresh and re-enrollment
+- Certificate-based device identification
 
+### 🚀 Remote Administration
+- Command and script execution
+- Software installation (Homebrew, App Store, DMG, PKG)
+- Policy application and compliance
+- Task scheduling and automation
+
+### 📊 Monitoring & Telemetry
+- Hardware metrics (CPU, memory, storage, network)
+- Software inventory and running processes
+- Security posture and compliance status
+- Performance monitoring and alerting
+
+## Getting Started
+
+### Prerequisites
+- macOS 12.0+ (Monterey or later)
+- Xcode 14.0+
+- Node.js 16.0+
+
+### Building the Swift Application
+1. Open `Huggin-MACOS/Huggin-MACOS.xcodeproj` in Xcode
+2. Build and run the project
+3. Configure ODIN connection in the app settings
+
+### Building the TypeScript Module
 ```bash
-npm install huginn-agent-integration
-```
-
-### Dependencies
-
-The module requires the following dependencies:
-- `keytar`: Secure credential storage
-- `node-fetch`: HTTP client for API communication
-- Node.js 16+ and macOS (darwin platform)
-
-## Quick Start
-
-```typescript
-import { initializeAgent, shutdownAgent, getAgentHealth } from 'huginn-agent-integration';
-
-// Initialize and start the agent
-async function startAgent() {
-  const initialized = await initializeAgent({
-    baseUrl: 'https://your-supabase-url.supabase.co/functions/v1',
-    pollInterval: 2 * 60 * 1000, // 2 minutes
-    telemetryInterval: 30 * 60 * 1000, // 30 minutes
-  });
-
-  if (initialized) {
-    console.log('Agent started successfully');
-    
-    // Check agent health
-    const health = getAgentHealth();
-    console.log('Agent status:', health.status);
-  } else {
-    console.error('Failed to initialize agent');
-  }
-}
-
-// Graceful shutdown
-process.on('SIGINT', async () => {
-  await shutdownAgent();
-  process.exit(0);
-});
-
-startAgent();
-```
-
-## Advanced Usage
-
-### Custom Configuration
-
-```typescript
-import { AgentService } from 'huginn-agent-integration';
-
-const agent = new AgentService({
-  baseUrl: 'https://your-supabase-url.supabase.co/functions/v1',
-  serviceName: 'my-custom-agent',
-  pollInterval: 60 * 1000, // 1 minute
-  telemetryInterval: 15 * 60 * 1000, // 15 minutes
-  maxRetries: 5
-});
-
-// Event handling
-agent.on('enrolled', (data) => {
-  console.log('Agent enrolled:', data.agent_id);
-});
-
-agent.on('taskCompleted', (data) => {
-  console.log('Task completed:', data.task.task_id);
-});
-
-agent.on('taskFailed', (data) => {
-  console.error('Task failed:', data.task.task_id, data.result.error);
-});
-
-agent.on('telemetrySent', (data) => {
-  console.log('Telemetry sent successfully');
-});
-
-await agent.initialize();
-await agent.start();
-```
-
-### Manual Task Execution
-
-```typescript
-import { taskExecutor } from 'huginn-agent-integration';
-
-// Execute a command
-const commandResult = await taskExecutor.execute({
-  task_id: 'manual-command-1',
-  type: 'run_command',
-  payload: {
-    command: 'brew',
-    args: ['list', '--installed'],
-    workingDirectory: '/usr/local'
-  },
-  priority: 1,
-  created_at: new Date().toISOString()
-});
-
-// Execute a script
-const scriptResult = await taskExecutor.execute({
-  task_id: 'manual-script-1',
-  type: 'run_script',
-  payload: {
-    content: `#!/bin/bash
-echo "System Info:"
-uname -a
-df -h`,
-    interpreter: 'bash'
-  },
-  priority: 1,
-  created_at: new Date().toISOString()
-});
-
-// Install software
-const installResult = await taskExecutor.execute({
-  task_id: 'manual-install-1',
-  type: 'install_software',
-  payload: {
-    name: 'git',
-    source: 'homebrew',
-    version: 'latest'
-  },
-  priority: 1,
-  created_at: new Date().toISOString()
-});
-```
-
-### System Information Collection
-
-```typescript
-import { systemInfoProvider, telemetryCollector } from 'huginn-agent-integration';
-
-// Get basic device information
-const deviceInfo = await systemInfoProvider.getDeviceInfo();
-console.log('Device:', deviceInfo.hostname, deviceInfo.platform);
-
-// Get comprehensive system metrics
-const metrics = await systemInfoProvider.getSystemMetrics();
-console.log('CPU Usage:', metrics.cpu.usage + '%');
-console.log('Memory Usage:', metrics.memory.usage + '%');
-
-// Get security information
-const security = await systemInfoProvider.getSecurityInfo();
-console.log('Firewall enabled:', security.firewall.enabled);
-console.log('FileVault enabled:', security.encryption.enabled);
-
-// Collect full telemetry
-const telemetry = await telemetryCollector.collect();
-console.log('Telemetry collected:', telemetry.timestamp);
-```
-
-### Custom Logging
-
-```typescript
-import { logger, LogLevel } from 'huginn-agent-integration';
-
-// Configure logging
-logger.setLogLevel(LogLevel.DEBUG);
-logger.enableFileLogging(true);
-logger.setLogFile('/var/log/huginn-agent.log');
-
-// Structured logging
-logger.info('Agent operation completed', {
-  operation: 'software_install',
-  package: 'git',
-  duration: 1500
-});
-
-logger.logSecurityEvent('Firewall disabled', 'high', {
-  user: 'admin',
-  timestamp: new Date().toISOString()
-});
-
-// Export logs for support
-const exported = logger.exportLogs('/tmp/huginn-logs.json');
-if (exported) {
-  console.log('Logs exported successfully');
-}
-```
-
-## API Endpoints
-
-The module communicates with the following ODIN Supabase edge functions:
-
-### Authentication
-- `POST /functions/v1/check-agent-status` - Agent enrollment and status check
-- `POST /functions/v1/refresh-token` - Token refresh
-
-### Task Management
-- `POST /functions/v1/agent-get-tasks` - Fetch pending tasks
-- `POST /functions/v1/agent-update-task` - Update task status and results
-
-### Telemetry
-- `POST /functions/v1/process-agent-telemetry` - Send system telemetry
-
-## Task Types
-
-### Command Execution (`run_command`)
-```json
-{
-  "command": "brew",
-  "args": ["install", "git"],
-  "workingDirectory": "/usr/local",
-  "environment": {"PATH": "/usr/local/bin:/usr/bin:/bin"},
-  "timeout": 300000
-}
-```
-
-### Script Execution (`run_script`)
-```json
-{
-  "content": "#!/bin/bash\necho 'Hello World'",
-  "interpreter": "bash",
-  "arguments": ["arg1", "arg2"],
-  "workingDirectory": "/tmp"
-}
-```
-
-### Software Installation (`install_software`)
-```json
-{
-  "name": "visual-studio-code",
-  "source": "homebrew",
-  "version": "latest",
-  "installArgs": ["--cask"],
-  "preInstallScript": "echo 'Preparing installation'",
-  "postInstallScript": "echo 'Installation complete'"
-}
-```
-
-### Policy Application (`apply_policy`)
-```json
-{
-  "type": "security",
-  "name": "firewall",
-  "settings": {"enabled": true, "stealth_mode": true},
-  "validation": "sudo /usr/libexec/ApplicationFirewall/socketfilterfw --getglobalstate",
-  "rollback": "sudo /usr/libexec/ApplicationFirewall/socketfilterfw --setglobalstate off"
-}
-```
-
-## Security Features
-
-### Command Safety
-- Blacklist of dangerous commands (`rm -rf /`, `dd if=`, `shutdown`, etc.)
-- Working directory restrictions
-- Environment variable sanitization
-- Timeout enforcement (default 5 minutes)
-
-### Credential Security
-- Encrypted storage in macOS Keychain
-- Automatic token rotation
-- Secure API communication with HTTPS
-- No credentials stored in memory longer than necessary
-
-### Execution Safety
-- Temporary file cleanup
-- Process isolation
-- Resource limits (1MB output buffer)
-- Script validation and sandboxing
-
-## Development
-
-### Building
-```bash
+cd Huggin-MACOS
+npm install
 npm run build
 ```
 
-### Testing
+### Running Tests
 ```bash
+# TypeScript tests
 npm test
-npm run test:coverage
-```
 
-### Linting
-```bash
-npm run lint
-npm run lint:fix
-```
-
-### Development Mode
-```bash
-npm run dev
+# Swift tests (run from Xcode)
 ```
 
 ## Configuration
 
-### Environment Variables
-- `NODE_ENV`: Set to 'production' for production logging
-- `LOG_LEVEL`: Set log level (DEBUG, INFO, WARN, ERROR)
+The agent requires configuration for ODIN platform integration:
+- **Base URL** - ODIN management platform endpoint
+- **Authentication** - Device enrollment and credentials
+- **Polling intervals** - Task and telemetry collection frequency
 
-### Configuration Options
-```typescript
-interface AgentConfig {
-  baseUrl: string;           // Supabase functions URL
-  serviceName: string;       // Keychain service name
-  pollInterval: number;      // Task polling interval (ms)
-  telemetryInterval: number; // Telemetry reporting interval (ms)
-  maxRetries: number;        // Maximum retry attempts
-}
+## Documentation
+
+- [`ODIN-INTEGRATION.md`](ODIN-INTEGRATION.md) - Original ODIN integration documentation
+- [`ODIN-V3-INTEGRATION.md`](ODIN-V3-INTEGRATION.md) - V3 integration guide
+- [`ODIN-V3-VERIFICATION.md`](ODIN-V3-VERIFICATION.md) - Integration verification steps
+- [`Huggin-MACOS/README.md`](Huggin-MACOS/README.md) - TypeScript module documentation
+
+## Architecture
+
 ```
-
-## Troubleshooting
-
-### Common Issues
-
-1. **Keychain Access Denied**
-   - Ensure the application has keychain access permissions
-   - Check macOS security settings
-
-2. **Network Connectivity**
-   - Verify Supabase URL is accessible
-   - Check firewall and proxy settings
-
-3. **Task Execution Failures**
-   - Review logs for specific error messages
-   - Ensure required tools (brew, mas) are installed
-   - Check file permissions and paths
-
-4. **High CPU/Memory Usage**
-   - Adjust polling intervals
-   - Review telemetry collection frequency
-   - Check for resource-intensive tasks
-
-### Debug Logging
-```typescript
-import { logger, LogLevel } from 'huginn-agent-integration';
-
-logger.setLogLevel(LogLevel.DEBUG);
-logger.enableConsoleLogging(true);
-logger.enableFileLogging(true);
-```
-
-### Health Monitoring
-```typescript
-import { getAgentHealth } from 'huginn-agent-integration';
-
-setInterval(() => {
-  const health = getAgentHealth();
-  if (health.status !== 'healthy') {
-    console.error('Agent health issue:', health);
-  }
-}, 60000); // Check every minute
+┌─────────────────────────────────────────┐
+│             macOS Application           │
+│  ┌─────────────┐  ┌─────────────────────┤
+│  │  SwiftUI    │  │   ODIN Services     │
+│  │  Interface  │◄─┤  - Agent V3         │
+│  │             │  │  - Network V3       │
+│  │             │  │  - Token Manager    │
+│  └─────────────┘  │  - Auth Manager     │
+└────────────────────┴─────────────────────┘
+           │
+           ▼
+┌─────────────────────────────────────────┐
+│       TypeScript Integration           │
+│  ┌─────────────┐  ┌─────────────────────┤
+│  │   Agent     │  │   Services          │
+│  │  Service    │◄─┤  - Task Executor    │
+│  │             │  │  - Telemetry        │
+│  │             │  │  - System Info      │
+│  └─────────────┘  │  - Logger           │
+└────────────────────┴─────────────────────┘
+           │
+           ▼
+┌─────────────────────────────────────────┐
+│          ODIN Platform                  │
+│     (Supabase Backend)                  │
+└─────────────────────────────────────────┘
 ```
 
 ## License
 
 MIT License - see LICENSE file for details.
 
+## Contributing
+
+1. Fork the repository
+2. Create a feature branch
+3. Make your changes
+4. Add tests if applicable
+5. Submit a pull request
+
 ## Support
 
-For support and bug reports, please check the logs first:
-
-```typescript
-import { logger } from 'huginn-agent-integration';
-
-// Export recent logs
-logger.exportLogs('/tmp/huginn-debug-logs.json');
-```
-
-The exported logs contain comprehensive debugging information including API calls, task execution details, and system metrics. 
+For issues and support, please create an issue in this repository or contact the development team. 
