@@ -141,9 +141,10 @@ public class OllamaScriptGenerationService: ObservableObject {
         3. **PATH setup**: Always ensure proper PATH includes /opt/homebrew/bin and /usr/local/bin
         4. **Error handling**: Check if commands exist before using them
         5. **Safe installation**: Check if already installed before attempting installation
-        6. **Verification**: Verify successful installation after completion
+        6. **Verification**: Verify successful installation after completion and FAIL if not found
         7. **Alternative methods**: Provide fallback options (cask, App Store, direct download)
         8. **GUI app launching**: For GUI applications, use 'open -a "AppName"' to launch, NOT command line
+        9. **Corruption handling**: If installation claims success but app is missing, suggest reinstallation
         
         IMPORTANT: This script will run on macOS. Do not use Windows package managers or commands.
         
@@ -153,10 +154,18 @@ public class OllamaScriptGenerationService: ObservableObject {
         - mas install (for App Store apps, if mas is available)
         - Direct download with curl/wget if needed
         
-        For GUI applications:
-        - Use 'brew install --cask appname' to install
+        For GUI applications like Slack, Discord, Chrome, etc.:
+        - ALWAYS use 'brew install --cask appname' to install
         - Use 'open -a "App Name"' to launch (NOT 'appname' command)
         - Check for app in /Applications/AppName.app before launching
+        - NEVER try to copy .app files manually - use Homebrew cask instead
+        
+        Common GUI applications and their cask names:
+        - Slack: brew install --cask slack
+        - Discord: brew install --cask discord
+        - Chrome: brew install --cask google-chrome
+        - Firefox: brew install --cask firefox
+        - VS Code: brew install --cask visual-studio-code
         
         Return ONLY the bash script code, starting with #!/bin/bash. No explanations or markdown.
         """
@@ -392,24 +401,68 @@ public class OllamaScriptGenerationService: ObservableObject {
     }
     
     private func extractSoftwareName(from message: String) -> String {
-        // Common patterns for software names
+        let messageLower = message.lowercased()
+        
+        // Common software names to look for first
+        let knownSoftware = [
+            "slack", "discord", "chrome", "firefox", "safari", "opera", "edge",
+            "vscode", "code", "atom", "sublime", "vim", "emacs",
+            "docker", "node", "npm", "yarn", "git", "python", "java", "go",
+            "xcode", "android studio", "intellij", "pycharm",
+            "photoshop", "illustrator", "sketch", "figma",
+            "spotify", "vlc", "zoom", "teams", "skype",
+            "homebrew", "brew", "mas", "wget", "curl"
+        ]
+        
+        // Check for known software names first
+        for software in knownSoftware {
+            if messageLower.contains(software) {
+                return software
+            }
+        }
+        
+        // Pattern-based extraction for "install X" format
         let patterns = [
-            "install (.+)",
-            "brew install (.+)",
-            "get (.+)",
-            "setup (.+)",
-            "add (.+)"
+            "install ([a-zA-Z][a-zA-Z0-9\\-_]+)",
+            "brew install ([a-zA-Z][a-zA-Z0-9\\-_]+)",
+            "get ([a-zA-Z][a-zA-Z0-9\\-_]+)",
+            "setup ([a-zA-Z][a-zA-Z0-9\\-_]+)",
+            "add ([a-zA-Z][a-zA-Z0-9\\-_]+)"
         ]
         
         for pattern in patterns {
             if let regex = try? NSRegularExpression(pattern: pattern, options: .caseInsensitive),
                let match = regex.firstMatch(in: message, options: [], range: NSRange(location: 0, length: message.count)),
+               match.numberOfRanges > 1,
                let range = Range(match.range(at: 1), in: message) {
-                return String(message[range]).trimmingCharacters(in: .whitespacesAndNewlines)
+                let candidate = String(message[range]).trimmingCharacters(in: .whitespacesAndNewlines)
+                
+                // Filter out common words that aren't software names
+                let excludeWords = ["you", "me", "can", "please", "help", "the", "a", "an", "to", "for", "with", "and", "or", "but", "from", "on", "in", "at", "by"]
+                if !excludeWords.contains(candidate.lowercased()) && candidate.count > 2 {
+                    return candidate
+                }
             }
         }
         
-        // Fallback: return the whole message
+        // Last resort: look for words after install keywords that aren't common words
+        let words = message.components(separatedBy: .whitespacesAndNewlines)
+        let excludeWords = ["you", "me", "can", "please", "help", "the", "a", "an", "to", "for", "with", "and", "or", "but", "from", "on", "in", "at", "by", "install", "download", "get", "setup", "add"]
+        
+        var foundInstallKeyword = false
+        for word in words {
+            let cleanWord = word.trimmingCharacters(in: .punctuationCharacters).lowercased()
+            if ["install", "download", "get", "setup", "add"].contains(cleanWord) {
+                foundInstallKeyword = true
+                continue
+            }
+            
+            if foundInstallKeyword && !excludeWords.contains(cleanWord) && cleanWord.count > 2 {
+                return word.trimmingCharacters(in: .punctuationCharacters)
+            }
+        }
+        
+        // Fallback: return the whole message, but clean it up
         return message.trimmingCharacters(in: .whitespacesAndNewlines)
     }
     
@@ -542,6 +595,15 @@ public class OllamaScriptGenerationService: ObservableObject {
     private func generateBasicInstallationScript(software: String, method: InstallationMethod) -> String {
         switch method {
         case .homebrew:
+            // Determine if it's a GUI app that needs cask installation
+            let guiApps = ["slack", "discord", "chrome", "firefox", "opera", "edge", "safari", 
+                          "vscode", "code", "atom", "sublime", "xcode", "android studio", "intellij", "pycharm",
+                          "photoshop", "illustrator", "sketch", "figma", "spotify", "vlc", "zoom", "teams", "skype"]
+            let softwareLower = software.lowercased()
+            let isGuiApp = guiApps.contains { softwareLower.contains($0) }
+            let installCommand = isGuiApp ? "brew install --cask \(software)" : "brew install \(software)"
+            let checkCommand = isGuiApp ? "brew list --cask \(software)" : "brew list \(software)"
+            
             return """
             #!/bin/bash
             set -e
@@ -553,42 +615,62 @@ public class OllamaScriptGenerationService: ObservableObject {
             # Set up common paths for Homebrew (handles sandboxed environments)
             export PATH="/opt/homebrew/bin:/usr/local/bin:$PATH"
             
-            # Check if Homebrew is installed
+            # Robust Homebrew detection and setup
             if ! command -v brew &> /dev/null; then
-                echo "Checking common Homebrew locations..."
+                echo "Homebrew not found in PATH, checking common locations..."
                 if [ -f "/opt/homebrew/bin/brew" ]; then
                     export PATH="/opt/homebrew/bin:$PATH"
-                    echo "Found Homebrew at /opt/homebrew/bin"
+                    echo "✅ Found Homebrew at /opt/homebrew/bin"
                 elif [ -f "/usr/local/bin/brew" ]; then
                     export PATH="/usr/local/bin:$PATH"
-                    echo "Found Homebrew at /usr/local/bin"
+                    echo "✅ Found Homebrew at /usr/local/bin"
                 else
-                    echo "Error: Homebrew is not installed. Please install it first:"
+                    echo "❌ Error: Homebrew is not installed. Please install it first:"
                     echo "/bin/bash -c \"$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)\""
                     echo ""
                     echo "After installation, you may need to add Homebrew to your PATH:"
                     echo "echo 'export PATH=\"/opt/homebrew/bin:$PATH\"' >> ~/.zshrc"
                     exit 127
                 fi
+            else
+                echo "✅ Homebrew is available at: $(which brew)"
             fi
             
+            echo "Detected software type: \(isGuiApp ? "GUI application (using cask)" : "CLI tool")"
+            
             # Check if software is already installed
-            if brew list \(software) &> /dev/null; then
+            if \(checkCommand) &> /dev/null; then
                 echo "\(software) is already installed."
-                brew info \(software)
+                brew info \(isGuiApp ? "--cask " : "")\(software)
             else
                 echo "Installing \(software)..."
-                brew install \(software)
+                \(installCommand)
                 echo "\(software) installation completed!"
             fi
             
-            # Verify installation
+            # Verify installation for GUI apps
+            \(isGuiApp ? """
+            # Check if the app was properly installed
+            if [ -d "/Applications/\(software.capitalized).app" ]; then
+                echo "✅ \(software.capitalized) is successfully installed in /Applications/"
+                echo "You can launch it with: open -a \"\(software.capitalized)\""
+            else
+                echo "❌ Installation failed: \(software.capitalized).app not found in /Applications/"
+                echo "This might indicate a corrupted installation. Try:"
+                echo "  brew uninstall --cask \(software)"
+                echo "  brew install --cask \(software)"
+                exit 1
+            fi
+            """ : """
             if command -v \(software) &> /dev/null; then
-                echo "✓ \(software) is now available in your PATH"
+                echo "✅ \(software) is now available in your PATH"
                 \(software) --version 2>/dev/null || echo "Installation verified"
             else
-                echo "⚠️  \(software) installed but not found in PATH. You may need to restart your terminal."
+                echo "❌ Installation failed: \(software) not found in PATH"
+                echo "You may need to restart your terminal or check the installation."
+                exit 1
             fi
+            """)
             """
             
         case .appStore:

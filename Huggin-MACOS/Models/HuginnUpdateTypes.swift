@@ -1,6 +1,6 @@
 import Foundation
 
-public struct HomebrewUpdate: Identifiable, Hashable {
+public struct HuginnHomebrewUpdate: Identifiable, Hashable {
     public let id: String
     public let name: String
     public let currentVersion: String
@@ -15,7 +15,7 @@ public struct HomebrewUpdate: Identifiable, Hashable {
         self.size = size
     }
     
-    public static func == (lhs: HomebrewUpdate, rhs: HomebrewUpdate) -> Bool {
+    public static func == (lhs: HuginnHomebrewUpdate, rhs: HuginnHomebrewUpdate) -> Bool {
         lhs.id == rhs.id
     }
     
@@ -24,7 +24,7 @@ public struct HomebrewUpdate: Identifiable, Hashable {
     }
 }
 
-public struct AppStoreUpdate: Identifiable, Hashable {
+public struct HuginnAppStoreUpdate: Identifiable, Hashable {
     public let id: String
     public let name: String
     public let currentVersion: String
@@ -39,7 +39,7 @@ public struct AppStoreUpdate: Identifiable, Hashable {
         self.size = size
     }
     
-    public static func == (lhs: AppStoreUpdate, rhs: AppStoreUpdate) -> Bool {
+    public static func == (lhs: HuginnAppStoreUpdate, rhs: HuginnAppStoreUpdate) -> Bool {
         lhs.id == rhs.id
     }
     
@@ -48,7 +48,7 @@ public struct AppStoreUpdate: Identifiable, Hashable {
     }
 }
 
-public struct SoftwareUpdate: Identifiable {
+public struct HuginnSoftwareUpdate: Identifiable {
     public let id: String
     public let name: String
     public let version: String
@@ -63,20 +63,5 @@ public struct SoftwareUpdate: Identifiable {
         self.description = description
         self.size = size
         self.isInstalled = isInstalled
-    }
-}
-
-public struct SoftwareItem: Identifiable {
-    public let id = UUID()
-    public let name: String
-    public let version: String
-    public let path: String
-    public let isSystem: Bool
-    
-    public init(name: String, version: String, path: String, isSystem: Bool) {
-        self.name = name
-        self.version = version
-        self.path = path
-        self.isSystem = isSystem
     }
 } 

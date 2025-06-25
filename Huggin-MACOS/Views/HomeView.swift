@@ -135,10 +135,7 @@ struct HomeView: View {
             eventMonitor.setSystemInfo(systemInfo)
             // Start metrics collection immediately
             startMetricsCollection()
-            // Check for updates in the background
-            Task {
-                await updateManager.checkForUpdates()
-            }
+            // Update checks are managed centrally
         }
         .onDisappear {
             // Clean up timer when view disappears

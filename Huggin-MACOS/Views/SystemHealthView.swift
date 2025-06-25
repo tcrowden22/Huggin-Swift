@@ -8,25 +8,30 @@ struct SystemHealthView: View {
     @StateObject private var securityProvider = SecurityStatusProvider()
     @State private var showOSUpdateModal = false
     @State private var showThirdPartyUpdateModal = false
-    
+    @State private var alertMessage = ""
+    @State private var showingAlert = false
+    @State private var updatingPackages: Set<String> = []
+    @State private var completedPackages: Set<String> = []
+    @State private var selectedUpdates: Set<String> = []
+    @State private var installationProgress: [String: Double] = [:]
+    @State private var estimatedTimeRemaining: [String: TimeInterval] = [:]
+
     init(systemInfo: SystemInfoProvider) {
         _systemInfo = ObservedObject(wrappedValue: systemInfo)
         _healthProvider = StateObject(wrappedValue: SystemHealthProvider(systemInfo: systemInfo))
     }
-    
+
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 24) {
-                // Title and Update Status
+                // Restart notification banner
+                if updateProvider.requiresReboot {
+                    restartNotificationBanner
+                }
+                
                 titleSection
-                
-                // Security Section
                 securitySection
-                
-                // System Metrics
                 metricsSection
-                
-                // Updates Section
                 updatesSection
             }
             .padding()
@@ -41,8 +46,18 @@ struct SystemHealthView: View {
         .sheet(isPresented: $showThirdPartyUpdateModal) {
             thirdPartyUpdateModal
         }
+        .alert("Update Status", isPresented: $showingAlert) {
+            Button("OK", role: .cancel) { }
+        } message: {
+            Text(alertMessage)
+        }
     }
-    
+
+    private func loadData() async {
+        // Only load security status - updates are managed centrally
+        await securityProvider.checkSecurityStatus()
+    }
+
     private var titleSection: some View {
         HStack {
             Text("System Health")
@@ -66,7 +81,7 @@ struct SystemHealthView: View {
             }
         }
     }
-    
+
     private var securitySection: some View {
         VStack(alignment: .leading, spacing: 16) {
             Text("Security Status")
@@ -105,7 +120,7 @@ struct SystemHealthView: View {
         )
         .shadow(color: Color.black.opacity(0.06), radius: 6, x: 0, y: 2)
     }
-    
+
     private var metricsSection: some View {
         VStack(alignment: .leading, spacing: 16) {
             Text("System Metrics")
@@ -129,7 +144,7 @@ struct SystemHealthView: View {
         )
         .shadow(color: Color.black.opacity(0.06), radius: 6, x: 0, y: 2)
     }
-    
+
     private var updatesSection: some View {
         VStack(alignment: .leading, spacing: 16) {
             Text("System Updates")
@@ -154,7 +169,7 @@ struct SystemHealthView: View {
         )
         .shadow(color: Color.black.opacity(0.06), radius: 6, x: 0, y: 2)
     }
-    
+
     private var macOSUpdateCard: some View {
         Button(action: {
             if updateProvider.osUpdateAvailable {
@@ -175,20 +190,44 @@ struct SystemHealthView: View {
                 }
                 
                 if updateProvider.osUpdateAvailable {
-                    ForEach(updateProvider.updates.prefix(2), id: \.id) { update in
-                        Text(update.name)
-                            .font(.caption)
-                            .foregroundColor(.secondary)
+                    VStack(alignment: .leading, spacing: 8) {
+                        ForEach(updateProvider.updates.prefix(2), id: \.id) { update in
+                            VStack(alignment: .leading, spacing: 4) {
+                                Text(update.name)
+                                    .font(.subheadline)
+                                    .foregroundColor(.primary)
+                                
+                                Text(update.description)
+                                    .font(.caption)
+                                    .foregroundColor(.secondary)
+                                    .lineLimit(2)
+                                
+                                HStack(spacing: 16) {
+                                    Label("\(update.size / 1_000_000_000, specifier: "%.1f") GB", systemImage: "arrow.down.circle")
+                                        .font(.caption)
+                                        .foregroundColor(.blue)
+                                    
+                                    Label("v\(update.version)", systemImage: "tag")
+                                        .font(.caption)
+                                        .foregroundColor(.secondary)
+                                }
+                            }
+                            .padding(8)
+                        }
+                        
+                        // Update checks are managed centrally - removed redundant button
+                        
+                        Button(action: {
+                            Task {
+                                await updateProvider.checkPendingRestart()
+                            }
+                        }) {
+                            Label("Check for Restart", systemImage: "arrow.clockwise.circle")
+                                .font(.caption)
+                                .foregroundColor(.orange)
+                        }
+                        .buttonStyle(PlainButtonStyle())
                     }
-                    if updateProvider.updates.count > 2 {
-                        Text("+ \(updateProvider.updates.count - 2) more updates...")
-                            .font(.caption)
-                            .foregroundColor(.secondary)
-                    }
-                } else {
-                    Text("System is up to date")
-                        .font(.caption)
-                        .foregroundColor(.secondary)
                 }
             }
             .padding(16)
@@ -201,9 +240,8 @@ struct SystemHealthView: View {
             .shadow(color: Color.black.opacity(0.04), radius: 4, x: 0, y: 2)
         }
         .buttonStyle(PlainButtonStyle())
-        .disabled(!updateProvider.osUpdateAvailable)
     }
-    
+
     private var thirdPartyUpdateCard: some View {
         Button(action: {
             if updateProvider.thirdPartyUpdatesAvailable {
@@ -211,55 +249,8 @@ struct SystemHealthView: View {
             }
         }) {
             VStack(alignment: .leading, spacing: 12) {
-                HStack {
-                    Image(systemName: "app.badge")
-                        .font(.title2)
-                        .foregroundColor(updateProvider.thirdPartyUpdatesAvailable ? .orange : .green)
-                                            Text("Third-party Updates")
-                        .font(.headline)
-                        .foregroundColor(.primary)
-                    Spacer()
-                    Image(systemName: updateProvider.thirdPartyUpdatesAvailable ? "exclamationmark.triangle.fill" : "checkmark.circle.fill")
-                        .foregroundColor(updateProvider.thirdPartyUpdatesAvailable ? .orange : .green)
-                }
-                
-                if !updateProvider.toolStatus["brew", default: false] {
-                    HStack(spacing: 8) {
-                        Image(systemName: "exclamationmark.triangle.fill")
-                            .foregroundColor(.orange)
-                        Text("Homebrew not installed")
-                            .font(.caption)
-                            .foregroundColor(.orange)
-                    }
-                }
-                
-                if !updateProvider.toolStatus["mas", default: false] {
-                    HStack(spacing: 8) {
-                        Image(systemName: "exclamationmark.triangle.fill")
-                            .foregroundColor(.orange)
-                        Text("mas-cli not installed")
-                            .font(.caption)
-                            .foregroundColor(.orange)
-                    }
-                }
-                
-                if updateProvider.thirdPartyUpdatesAvailable {
-                    let filteredDetails = updateProvider.updateDetails.filter { $0.contains("Homebrew") || $0.contains("App Store") }
-                    ForEach(filteredDetails.prefix(2), id: \.self) { detail in
-                        Text(detail)
-                            .font(.caption)
-                            .foregroundColor(.secondary)
-                    }
-                    if filteredDetails.count > 2 {
-                        Text("+ \(filteredDetails.count - 2) more updates...")
-                            .font(.caption)
-                            .foregroundColor(.secondary)
-                    }
-                } else if updateProvider.toolStatus["brew", default: false] && updateProvider.toolStatus["mas", default: false] {
-                    Text("All third-party software is up to date")
-                        .font(.caption)
-                        .foregroundColor(.secondary)
-                }
+                thirdPartyUpdateHeader
+                thirdPartyUpdateContent
             }
             .padding(16)
             .background(Color(.controlBackgroundColor))
@@ -271,21 +262,312 @@ struct SystemHealthView: View {
             .shadow(color: Color.black.opacity(0.04), radius: 4, x: 0, y: 2)
         }
         .buttonStyle(PlainButtonStyle())
-        .disabled(!updateProvider.thirdPartyUpdatesAvailable)
     }
     
+    private var thirdPartyUpdateHeader: some View {
+        HStack {
+            Image(systemName: "app.badge")
+                .font(.title2)
+                .foregroundColor(updateProvider.thirdPartyUpdatesAvailable ? .orange : .green)
+            Text("Third-party Updates")
+                .font(.headline)
+                .foregroundColor(.primary)
+            Spacer()
+            Image(systemName: updateProvider.thirdPartyUpdatesAvailable ? "exclamationmark.triangle.fill" : "checkmark.circle.fill")
+                .foregroundColor(updateProvider.thirdPartyUpdatesAvailable ? .orange : .green)
+        }
+    }
+    
+    private var thirdPartyUpdateContent: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            if !updateProvider.toolStatus["brew", default: false] || !updateProvider.toolStatus["mas", default: false] {
+                toolStatusWarnings
+            }
+            
+            if updateProvider.thirdPartyUpdatesAvailable {
+                availableUpdatesSection
+            } else if updateProvider.toolStatus["brew", default: false] && updateProvider.toolStatus["mas", default: false] {
+                upToDateSection
+            }
+        }
+    }
+    
+    private var toolStatusWarnings: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            if !updateProvider.toolStatus["brew", default: false] {
+                HStack(spacing: 8) {
+                    Image(systemName: "exclamationmark.triangle.fill")
+                        .foregroundColor(.orange)
+                    Text("Homebrew not installed")
+                        .font(.caption)
+                        .foregroundColor(.orange)
+                }
+            }
+            
+            if !updateProvider.toolStatus["mas", default: false] {
+                HStack(spacing: 8) {
+                    Image(systemName: "exclamationmark.triangle.fill")
+                        .foregroundColor(.orange)
+                    Text("mas-cli not installed")
+                        .font(.caption)
+                        .foregroundColor(.orange)
+                }
+            }
+        }
+        .padding(8)
+        .background(Color.orange.opacity(0.1))
+        .cornerRadius(8)
+    }
+    
+    private var availableUpdatesSection: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            if !updateProvider.homebrewUpdates.isEmpty {
+                homebrewUpdatesSection
+            }
+            
+            if !updateProvider.appStoreUpdates.isEmpty {
+                appStoreUpdatesSection
+            }
+            
+            Button(action: {
+                showThirdPartyUpdateModal = true
+            }) {
+                Text("View and Install Updates")
+                    .font(.subheadline)
+                    .foregroundColor(.white)
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 8)
+                    .background(Color.blue)
+                    .cornerRadius(8)
+            }
+            .buttonStyle(PlainButtonStyle())
+            .padding(.top, 8)
+        }
+    }
+    
+    private var homebrewUpdatesSection: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text("Homebrew Updates")
+                .font(.subheadline)
+                .foregroundColor(.primary)
+            
+            ForEach(updateProvider.homebrewUpdates.prefix(2), id: \.self) { package in
+                Text("\(package.name) (\(package.currentVersion) → \(package.newVersion))")
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+            }
+            if updateProvider.homebrewUpdates.count > 2 {
+                Text("+ \(updateProvider.homebrewUpdates.count - 2) more...")
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+            }
+        }
+        .padding(8)
+        .background(Color(.controlBackgroundColor))
+        .cornerRadius(8)
+    }
+    
+    private var appStoreUpdatesSection: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text("App Store Updates")
+                .font(.subheadline)
+                .foregroundColor(.primary)
+            
+            ForEach(updateProvider.appStoreUpdates.prefix(2), id: \.self) { app in
+                Text("\(app.name) (\(app.currentVersion) → \(app.newVersion))")
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+            }
+            if updateProvider.appStoreUpdates.count > 2 {
+                Text("+ \(updateProvider.appStoreUpdates.count - 2) more...")
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+            }
+        }
+        .padding(8)
+        .background(Color(.controlBackgroundColor))
+        .cornerRadius(8)
+    }
+    
+    private var upToDateSection: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text("All third-party software is up to date")
+                .font(.subheadline)
+                .foregroundColor(.secondary)
+            
+            // Update checks are managed centrally - removed redundant button
+        }
+    }
+
     private var osUpdateModal: some View {
-        UpdateDetailModal(
-            title: "macOS Updates",
-            icon: "apple.logo",
-            updates: updateProvider.updates.map { $0.name },
-            homebrewUpdates: [],
-            appStoreUpdates: [],
-            onClose: { showOSUpdateModal = false },
-            updateProvider: updateProvider
-        )
+        VStack(spacing: 24) {
+            HStack {
+                Image(systemName: "apple.logo")
+                    .font(.title)
+                    .foregroundColor(.orange)
+                Text("macOS Updates")
+                    .font(.title)
+                    .bold()
+                Spacer()
+                Button(action: { showOSUpdateModal = false }) {
+                    Image(systemName: "xmark.circle.fill")
+                        .font(.title2)
+                        .foregroundColor(.secondary)
+                }
+            }
+            
+            // Reboot Notification
+            if updateProvider.requiresReboot {
+                VStack(spacing: 8) {
+                    HStack {
+                        Image(systemName: "exclamationmark.triangle.fill")
+                            .foregroundColor(.orange)
+                        Text("System Restart Required")
+                            .font(.headline)
+                            .foregroundColor(.orange)
+                    }
+                    Text(updateProvider.rebootReason)
+                        .font(.subheadline)
+                        .foregroundColor(.secondary)
+                        .multilineTextAlignment(.center)
+                    
+                    Button(action: {
+                        Task {
+                            do {
+                                try await updateProvider.initiateReboot()
+                            } catch {
+                                alertMessage = "Failed to restart: \(error.localizedDescription)"
+                                showingAlert = true
+                            }
+                        }
+                    }) {
+                        HStack {
+                            Image(systemName: "arrow.clockwise")
+                            Text("Restart Now")
+                        }
+                        .font(.headline)
+                        .foregroundColor(.white)
+                        .frame(maxWidth: .infinity)
+                        .padding()
+                        .background(Color.orange)
+                        .cornerRadius(12)
+                    }
+                    .buttonStyle(PlainButtonStyle())
+                }
+                .padding()
+                .background(Color.orange.opacity(0.1))
+                .cornerRadius(12)
+                .overlay(
+                    RoundedRectangle(cornerRadius: 12)
+                        .stroke(Color.orange, lineWidth: 1)
+                )
+            }
+            
+            ScrollView {
+                VStack(alignment: .leading, spacing: 16) {
+                    ForEach(updateProvider.updates) { update in
+                        VStack(alignment: .leading, spacing: 12) {
+                            HStack {
+                                VStack(alignment: .leading, spacing: 4) {
+                                    Text(update.name)
+                                        .font(.headline)
+                                    Text(update.description)
+                                        .font(.subheadline)
+                                        .foregroundColor(.secondary)
+                                }
+                                Spacer()
+                                
+                                if updatingPackages.contains(update.name) {
+                                    VStack(alignment: .trailing, spacing: 4) {
+                                        Text("Installing...")
+                                            .font(.caption)
+                                            .foregroundColor(.blue)
+                                        ProgressView(value: installationProgress[update.name] ?? 0.0)
+                                            .frame(width: 100)
+                                        if let timeRemaining = estimatedTimeRemaining[update.name], timeRemaining > 0 {
+                                            Text("\(Int(timeRemaining / 60))m \(Int(timeRemaining.truncatingRemainder(dividingBy: 60)))s")
+                                                .font(.caption2)
+                                                .foregroundColor(.secondary)
+                                        }
+                                    }
+                                } else if completedPackages.contains(update.name) {
+                                    VStack(alignment: .trailing, spacing: 4) {
+                                        Image(systemName: "checkmark.circle.fill")
+                                            .foregroundColor(.green)
+                                        Text("Completed")
+                                            .font(.caption)
+                                            .foregroundColor(.green)
+                                    }
+                                } else if !update.isInstalled {
+                                    Button(action: {
+                                        Task {
+                                            do {
+                                                try await installSystemUpdate(update.name)
+                                            } catch {
+                                                alertMessage = "Failed to install update: \(error.localizedDescription)"
+                                                showingAlert = true
+                                            }
+                                        }
+                                    }) {
+                                        Text("Install")
+                                            .foregroundColor(.white)
+                                            .padding(.horizontal, 16)
+                                            .padding(.vertical, 8)
+                                            .background(Color.blue)
+                                            .cornerRadius(8)
+                                    }
+                                    .disabled(updatingPackages.count > 0)
+                                } else {
+                                    Image(systemName: "checkmark.circle.fill")
+                                        .foregroundColor(.green)
+                                }
+                            }
+                            
+                            HStack(spacing: 16) {
+                                Label("\(update.size / 1_000_000_000, specifier: "%.1f") GB", systemImage: "arrow.down.circle")
+                                    .font(.caption)
+                                    .foregroundColor(.blue)
+                                
+                                Label("v\(update.version)", systemImage: "tag")
+                                    .font(.caption)
+                                    .foregroundColor(.secondary)
+                            }
+                        }
+                        .padding()
+                        .background(Color(.controlBackgroundColor))
+                        .cornerRadius(12)
+                    }
+                }
+                .padding(.horizontal)
+            }
+            
+            // Install All Button
+            if !updateProvider.updates.isEmpty && !updateProvider.updates.allSatisfy({ $0.isInstalled || completedPackages.contains($0.name) }) {
+                Button(action: {
+                    Task {
+                        await installAllSystemUpdates()
+                    }
+                }) {
+                    HStack {
+                        Image(systemName: "arrow.down.circle.fill")
+                        Text("Install All Updates (\(updateProvider.updates.filter { !$0.isInstalled && !completedPackages.contains($0.name) }.count))")
+                    }
+                    .font(.headline)
+                    .foregroundColor(.white)
+                    .frame(maxWidth: .infinity)
+                    .padding()
+                    .background(Color.blue)
+                    .cornerRadius(12)
+                }
+                .buttonStyle(PlainButtonStyle())
+                .disabled(updatingPackages.count > 0)
+            }
+        }
+        .padding()
+        .frame(width: 600, height: 600)
+        .background(Color(.windowBackgroundColor))
     }
-    
+
     private var thirdPartyUpdateModal: some View {
         UpdateDetailModal(
             title: "Third-party Updates",
@@ -297,400 +579,101 @@ struct SystemHealthView: View {
             updateProvider: updateProvider
         )
     }
-    
-    private func loadData() async {
-        await Task.detached {
-            await securityProvider.checkSecurityStatus()
-            _ = try? await updateProvider.checkForUpdates()
-        }.value
-    }
-}
 
-struct HealthLineGraph: View {
-    let title: String
-    let data: [DataPoint]
-    let color: Color
-    let unit: String
-    
-    var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Text(title)
-                .font(.headline)
-                .foregroundColor(.primary)
-            
-            if !data.isEmpty {
-                Chart(data) { point in
-                    LineMark(
-                        x: .value("Time", point.time),
-                        y: .value("Value", point.value)
-                    )
-                    .foregroundStyle(color)
-                }
-                .frame(height: 120)
-                .chartYScale(domain: 0...100)
-                .chartXAxis(.hidden)
-                .chartYAxis(.visible)
-            } else {
-                Rectangle()
-                    .fill(Color.gray.opacity(0.2))
-                    .frame(height: 120)
-                    .overlay(
-                        Text("No data")
-                            .foregroundColor(.secondary)
-                    )
-            }
-            
-            Text("Current: \(String(format: "%.1f", data.last?.value ?? 0.0))\(unit)")
-                .font(.caption)
-                .foregroundColor(.secondary)
-        }
-        .padding(12)
-        .background(Color(.controlBackgroundColor))
-        .cornerRadius(12)
-        .overlay(
-            RoundedRectangle(cornerRadius: 12)
-                .stroke(Color(.separatorColor), lineWidth: 1)
-        )
-        .shadow(color: Color.black.opacity(0.04), radius: 4, x: 0, y: 2)
-    }
-}
-
-struct UpdateDetailModal: View {
-    let title: String
-    let icon: String
-    let updates: [String]
-    let homebrewUpdates: [String]
-    let appStoreUpdates: [String]
-    let onClose: () -> Void
-    @ObservedObject var updateProvider: SoftwareUpdateProvider
-    
-    @State private var updatingPackages: Set<String> = []
-    @State private var completedPackages: Set<String> = []
-    @State private var showingAlert = false
-    @State private var alertMessage = ""
-    
-    var body: some View {
-        VStack(spacing: 20) {
-            // Header
+    private var restartNotificationBanner: some View {
+        VStack(spacing: 12) {
             HStack {
-                Image(systemName: icon)
-                    .font(.title)
+                Image(systemName: "exclamationmark.triangle.fill")
                     .foregroundColor(.orange)
-                Text(title)
                     .font(.title2)
-                    .bold()
-                    .foregroundColor(.primary)
-                Spacer()
-                Button(action: onClose) {
-                    Image(systemName: "xmark.circle.fill")
-                        .font(.title2)
+                
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("System Restart Required")
+                        .font(.headline)
+                        .foregroundColor(.orange)
+                    Text(updateProvider.rebootReason)
+                        .font(.subheadline)
                         .foregroundColor(.secondary)
+                }
+                
+                Spacer()
+                
+                Button(action: {
+                    Task {
+                        do {
+                            try await updateProvider.initiateReboot()
+                        } catch {
+                            alertMessage = "Failed to restart: \(error.localizedDescription)"
+                            showingAlert = true
+                        }
+                    }
+                }) {
+                    HStack {
+                        Image(systemName: "arrow.clockwise")
+                        Text("Restart Now")
+                    }
+                    .font(.subheadline)
+                    .foregroundColor(.white)
+                    .padding(.horizontal, 16)
+                    .padding(.vertical, 8)
+                    .background(Color.orange)
+                    .cornerRadius(8)
                 }
                 .buttonStyle(PlainButtonStyle())
             }
-            .padding(.bottom)
-            
-            Divider()
-            
-            // Update List
-            ScrollView {
-                VStack(alignment: .leading, spacing: 16) {
-                    if homebrewUpdates.isEmpty && appStoreUpdates.isEmpty && updates.isEmpty {
-                        VStack(spacing: 16) {
-                            Image(systemName: "checkmark.circle.fill")
-                                .font(.system(size: 48))
-                                .foregroundColor(.green)
-                            Text("No updates available")
-                                .font(.title3)
-                                .foregroundColor(.primary)
-                            Text("Your system is up to date!")
-                                .font(.body)
-                                .foregroundColor(.secondary)
-                        }
-                        .frame(maxWidth: .infinity)
-                        .padding(.vertical, 40)
-                    }
-                    
-                    if !homebrewUpdates.isEmpty {
-                        VStack(alignment: .leading, spacing: 12) {
-                            Text("Homebrew Packages")
-                                .font(.headline)
-                                .foregroundColor(.primary)
-                                .padding(.bottom, 4)
-                            
-                            ForEach(homebrewUpdates, id: \.self) { package in
-                                HStack {
-                                    VStack(alignment: .leading, spacing: 4) {
-                                        Text(package)
-                                            .font(.body)
-                                            .foregroundColor(.primary)
-                                    }
-                                    Spacer()
-                                                                    Button(action: {
-                                    Task {
-                                        await updateHomebrewPackage(package)
-                                    }
-                                }) {
-                                    HStack(spacing: 4) {
-                                        if updatingPackages.contains(package) {
-                                            ProgressView()
-                                                .scaleEffect(0.8)
-                                                .progressViewStyle(CircularProgressViewStyle(tint: .white))
-                                        } else if completedPackages.contains(package) {
-                                            Image(systemName: "checkmark")
-                                                .foregroundColor(.white)
-                                        }
-                                        
-                                        Text(updatingPackages.contains(package) ? "Updating..." : 
-                                             completedPackages.contains(package) ? "Updated" : "Update")
-                                            .font(.subheadline)
-                                            .foregroundColor(.white)
-                                    }
-                                    .padding(.horizontal, 12)
-                                    .padding(.vertical, 6)
-                                    .background(completedPackages.contains(package) ? Color.green : Color.blue)
-                                    .cornerRadius(6)
-                                }
-                                .buttonStyle(PlainButtonStyle())
-                                .disabled(updatingPackages.contains(package) || completedPackages.contains(package))
-                                }
-                                .padding(.vertical, 8)
-                                .padding(.horizontal, 12)
-                                .background(Color(.controlBackgroundColor))
-                                .cornerRadius(8)
-                            }
-                        }
-                    }
-                    
-                    if !appStoreUpdates.isEmpty {
-                        VStack(alignment: .leading, spacing: 12) {
-                            Text("App Store Applications")
-                                .font(.headline)
-                                .foregroundColor(.primary)
-                                .padding(.bottom, 4)
-                            
-                            ForEach(appStoreUpdates, id: \.self) { app in
-                                HStack {
-                                    Text(app)
-                                        .font(.body)
-                                        .foregroundColor(.primary)
-                                    Spacer()
-                                    Button(action: {
-                                        Task {
-                                            await updateAppStoreApp(app)
-                                        }
-                                    }) {
-                                        HStack(spacing: 4) {
-                                            if updatingPackages.contains(app) {
-                                                ProgressView()
-                                                    .scaleEffect(0.8)
-                                                    .progressViewStyle(CircularProgressViewStyle(tint: .white))
-                                            } else if completedPackages.contains(app) {
-                                                Image(systemName: "checkmark")
-                                                    .foregroundColor(.white)
-                                            }
-                                            
-                                            Text(updatingPackages.contains(app) ? "Updating..." : 
-                                                 completedPackages.contains(app) ? "Updated" : "Update")
-                                                .font(.subheadline)
-                                                .foregroundColor(.white)
-                                        }
-                                        .padding(.horizontal, 12)
-                                        .padding(.vertical, 6)
-                                        .background(completedPackages.contains(app) ? Color.green : Color.blue)
-                                        .cornerRadius(6)
-                                    }
-                                    .buttonStyle(PlainButtonStyle())
-                                    .disabled(updatingPackages.contains(app) || completedPackages.contains(app))
-                                }
-                                .padding(.vertical, 8)
-                                .padding(.horizontal, 12)
-                                .background(Color(.controlBackgroundColor))
-                                .cornerRadius(8)
-                            }
-                        }
-                    }
-                    
-                    if !updates.isEmpty {
-                        VStack(alignment: .leading, spacing: 12) {
-                            Text("System Updates")
-                                .font(.headline)
-                                .foregroundColor(.primary)
-                                .padding(.bottom, 4)
-                            
-                            ForEach(updates, id: \.self) { update in
-                                HStack {
-                                    Text(update)
-                                        .font(.body)
-                                        .foregroundColor(.primary)
-                                    Spacer()
-                                    Button(action: {
-                                        Task {
-                                            await installSystemUpdate(update)
-                                        }
-                                    }) {
-                                        HStack(spacing: 4) {
-                                            if updatingPackages.contains(update) {
-                                                ProgressView()
-                                                    .scaleEffect(0.8)
-                                                    .progressViewStyle(CircularProgressViewStyle(tint: .white))
-                                            } else if completedPackages.contains(update) {
-                                                Image(systemName: "checkmark")
-                                                    .foregroundColor(.white)
-                                            }
-                                            
-                                            Text(updatingPackages.contains(update) ? "Installing..." : 
-                                                 completedPackages.contains(update) ? "Installed" : "Install")
-                                                .font(.subheadline)
-                                                .foregroundColor(.white)
-                                        }
-                                        .padding(.horizontal, 12)
-                                        .padding(.vertical, 6)
-                                        .background(completedPackages.contains(update) ? Color.green : Color.orange)
-                                        .cornerRadius(6)
-                                    }
-                                    .buttonStyle(PlainButtonStyle())
-                                    .disabled(updatingPackages.contains(update) || completedPackages.contains(update))
-                                }
-                                .padding(.vertical, 8)
-                                .padding(.horizontal, 12)
-                                .background(Color(.controlBackgroundColor))
-                                .cornerRadius(8)
-                            }
-                        }
-                    }
-                }
-                .padding(.horizontal)
-            }
-            .frame(height: 300)
         }
-        .padding(24)
-        .frame(width: 600, height: 500)
-        .background(Color(.windowBackgroundColor))
-        .cornerRadius(16)
-        .shadow(color: Color.black.opacity(0.1), radius: 10, x: 0, y: 5)
-        .alert("Update Status", isPresented: $showingAlert) {
-            Button("OK") { }
-        } message: {
-            Text(alertMessage)
-        }
-    }
-    
-    private func updateHomebrewPackage(_ package: String) async {
-        updatingPackages.insert(package)
-        
-        do {
-            print("Starting Homebrew update for package: \(package)")
-            await updateProvider.updateHomebrewPackage(package)
-            
-            // Simulate some processing time for visual feedback
-            try await Task.sleep(nanoseconds: 1_000_000_000)
-            
-            updatingPackages.remove(package)
-            completedPackages.insert(package)
-            
-            alertMessage = "Successfully updated \(package)"
-            showingAlert = true
-            print("Successfully updated Homebrew package: \(package)")
-            
-        } catch {
-            updatingPackages.remove(package)
-            alertMessage = "Failed to update \(package): \(error.localizedDescription)"
-            showingAlert = true
-            print("Failed to update Homebrew package \(package): \(error)")
-        }
-    }
-    
-    private func updateAppStoreApp(_ app: String) async {
-        updatingPackages.insert(app)
-        
-        do {
-            print("Starting App Store update for app: \(app)")
-            await updateProvider.updateAppStoreApp(app)
-            
-            // Add a small delay for visual feedback
-            try await Task.sleep(nanoseconds: 500_000_000)
-            
-            updatingPackages.remove(app)
-            completedPackages.insert(app)
-            
-            alertMessage = "Successfully updated \(app) from App Store"
-            showingAlert = true
-            print("Successfully updated App Store app: \(app)")
-            
-        } catch {
-            updatingPackages.remove(app)
-            alertMessage = "Failed to update \(app): \(error.localizedDescription)"
-            showingAlert = true
-            print("Failed to update App Store app \(app): \(error)")
-        }
-    }
-    
-    private func installSystemUpdate(_ update: String) async {
-        updatingPackages.insert(update)
-        
-        do {
-            print("Starting system update installation: \(update)")
-            
-            // Simulate system update process (longer duration)
-            try await Task.sleep(nanoseconds: 3_000_000_000)
-            
-            updatingPackages.remove(update)
-            completedPackages.insert(update)
-            
-            alertMessage = "Successfully installed system update: \(update)\nA restart may be required."
-            showingAlert = true
-            print("Successfully installed system update: \(update)")
-            
-        } catch {
-            updatingPackages.remove(update)
-            alertMessage = "Failed to install \(update): \(error.localizedDescription)"
-            showingAlert = true
-            print("Failed to install system update \(update): \(error)")
-        }
-    }
-}
-
-struct SecurityCard: View {
-    let title: String
-    let status: SecurityStatus
-    let icon: String
-    
-    var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            HStack {
-                Image(systemName: icon)
-                    .font(.title2)
-                    .foregroundColor(status.isSecure ? .green : .red)
-                Text(title)
-                    .font(.headline)
-                    .foregroundColor(.primary)
-                Spacer()
-                Image(systemName: status.isSecure ? "checkmark.circle.fill" : "xmark.circle.fill")
-                    .foregroundColor(status.isSecure ? .green : .red)
-            }
-            
-            if let details = status.details {
-                Text(details)
-                    .font(.caption)
-                    .foregroundColor(.secondary)
-                    .multilineTextAlignment(.leading)
-            }
-            
-            if let recommendation = status.recommendation {
-                Text(recommendation)
-                    .font(.caption)
-                    .foregroundColor(.orange)
-                    .multilineTextAlignment(.leading)
-            }
-        }
-        .padding(16)
-        .background(Color(.controlBackgroundColor))
+        .padding()
+        .background(Color.orange.opacity(0.1))
         .cornerRadius(12)
         .overlay(
             RoundedRectangle(cornerRadius: 12)
-                .stroke(Color(.separatorColor), lineWidth: 1)
+                .stroke(Color.orange, lineWidth: 1)
         )
-        .shadow(color: Color.black.opacity(0.04), radius: 4, x: 0, y: 2)
+    }
+
+    private func installSystemUpdate(_ update: String) async throws {
+        updatingPackages.insert(update)
+        installationProgress[update] = 0.0
+        estimatedTimeRemaining[update] = 300 // 5 minutes estimated
+        do {
+            print("Starting system update installation: \(update)")
+            for progress in stride(from: 0.0, to: 1.0, by: 0.1) {
+                installationProgress[update] = progress
+                estimatedTimeRemaining[update] = 300 * (1 - progress)
+                try await Task.sleep(nanoseconds: 500_000_000)
+            }
+            if let updateItem = updateProvider.updates.first(where: { $0.name == update }) {
+                try await updateProvider.installUpdate(updateItem)
+            } else {
+                throw NSError(domain: "UpdateError", code: 1, userInfo: [NSLocalizedDescriptionKey: "Update not found"])
+            }
+            installationProgress[update] = 1.0
+            estimatedTimeRemaining[update] = 0
+            updatingPackages.remove(update)
+            completedPackages.insert(update)
+            selectedUpdates.remove(update)
+            alertMessage = "Successfully installed system update: \(update)"
+            showingAlert = true
+            print("Successfully installed system update: \(update)")
+        } catch {
+            updatingPackages.remove(update)
+            installationProgress.removeValue(forKey: update)
+            estimatedTimeRemaining.removeValue(forKey: update)
+            throw error
+        }
+    }
+
+    private func installAllSystemUpdates() async {
+        let updatesToInstall = updateProvider.updates.filter { !$0.isInstalled && !completedPackages.contains($0.name) }
+        
+        for update in updatesToInstall {
+            do {
+                try await installSystemUpdate(update.name)
+            } catch {
+                alertMessage = "Failed to install \(update.name): \(error.localizedDescription)"
+                showingAlert = true
+                break
+            }
+        }
     }
 } 

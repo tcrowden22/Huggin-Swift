@@ -9,9 +9,17 @@ import SwiftUI
 
 @main
 struct Huggin_MACOSApp: App {
+    @StateObject private var odinService = OdinDirectService.shared
+    
     var body: some Scene {
         WindowGroup {
             ContentView()
+                .environmentObject(odinService)
+                .onAppear {
+                    // ODIN service is managed by OdinAgentServiceV3 in the settings view
+                    // No need to auto-start OdinDirectService
+                    // initializeOdinService()
+                }
         }
         .windowStyle(.hiddenTitleBar)
         .windowResizability(.contentSize)
@@ -29,5 +37,27 @@ struct Huggin_MACOSApp: App {
         }
         .menuBarExtraStyle(.window)
 #endif
+    }
+    
+    private func initializeOdinService() {
+        Task {
+            let settings = OdinSettings()
+            
+            print("🔵 APP: Initializing ODIN service on startup...")
+            print("🔵 APP: ODIN enabled: \(settings.isEnabled)")
+            print("🔵 APP: Auto start: \(settings.autoStart)")
+            print("🔵 APP: Valid config: \(settings.isValidConfiguration)")
+            
+            // Auto-start ODIN service if enabled and configured
+            if settings.isEnabled && settings.autoStart && settings.isValidConfiguration {
+                print("🔵 APP: Auto-starting ODIN service...")
+                await MainActor.run {
+                    odinService.configure(settings: settings)
+                }
+                await odinService.startService()
+            } else {
+                print("🔵 APP: ODIN service not auto-started (enabled: \(settings.isEnabled), autoStart: \(settings.autoStart), validConfig: \(settings.isValidConfiguration))")
+            }
+        }
     }
 }

@@ -185,9 +185,9 @@ public enum ScriptRiskLevel: String, CaseIterable, Sendable {
     
     public var color: Color {
         switch self {
-        case .low: return .green
-        case .medium: return .orange
-        case .high: return .red
+        case .low: return Color("huginn-green")
+        case .medium: return Color("huginn-orange")
+        case .high: return Color("huginn-red")
         }
     }
     
@@ -203,7 +203,7 @@ public enum ScriptRiskLevel: String, CaseIterable, Sendable {
 // MARK: - Extensions
 
 extension Color {
-    static let scriptGreen = Color.green
-    static let scriptOrange = Color.orange
-    static let scriptRed = Color.red
+    static let scriptGreen = Color("huginn-green")
+    static let scriptOrange = Color("huginn-orange")
+    static let scriptRed = Color("huginn-red")
 } 

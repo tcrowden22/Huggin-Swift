@@ -7,6 +7,17 @@ enum SystemHealthStatus: String {
     case unknown = "Unknown"
 }
 
+enum SecurityStatus {
+    case protected
+    case vulnerable
+}
+
+struct DataPoint: Identifiable {
+    let id = UUID()
+    let time: Date
+    let value: Double
+}
+
 struct SystemMetrics {
     var cpuUsage: Double = 0.0
     var memoryUsage: Double = 0.0

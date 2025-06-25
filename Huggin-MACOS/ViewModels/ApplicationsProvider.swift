@@ -46,6 +46,10 @@ public class ApplicationsProvider: ObservableObject, @unchecked Sendable {
         await fetchSystemInfo()
     }
     
+    public func loadApplications() async {
+        await refreshApplications()
+    }
+    
     private func fetchApplications() async {
         let applications = await withCheckedContinuation { continuation in
             Task.detached {

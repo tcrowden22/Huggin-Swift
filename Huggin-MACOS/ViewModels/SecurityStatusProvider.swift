@@ -1,7 +1,7 @@
 import Foundation
 import AppKit
 
-struct SecurityStatus {
+struct SecurityInfo {
     let isSecure: Bool
     let details: String?
     let recommendation: String?
@@ -9,9 +9,9 @@ struct SecurityStatus {
 
 @MainActor
 class SecurityStatusProvider: ObservableObject {
-    @Published var antivirusStatus: SecurityStatus = SecurityStatus(isSecure: false, details: nil, recommendation: nil)
-    @Published var firewallStatus: SecurityStatus = SecurityStatus(isSecure: false, details: nil, recommendation: nil)
-    @Published var diskEncryptionStatus: SecurityStatus = SecurityStatus(isSecure: false, details: nil, recommendation: nil)
+    @Published var antivirusStatus: SecurityInfo = SecurityInfo(isSecure: false, details: nil, recommendation: nil)
+    @Published var firewallStatus: SecurityInfo = SecurityInfo(isSecure: false, details: nil, recommendation: nil)
+    @Published var diskEncryptionStatus: SecurityInfo = SecurityInfo(isSecure: false, details: nil, recommendation: nil)
     
     func checkSecurityStatus() async {
         // Check Antivirus
@@ -22,6 +22,10 @@ class SecurityStatusProvider: ObservableObject {
         
         // Check Disk Encryption
         await checkDiskEncryption()
+    }
+    
+    func loadSecurityStatus() async {
+        await checkSecurityStatus()
     }
     
     private func checkAntivirus() async {
@@ -39,13 +43,13 @@ class SecurityStatusProvider: ObservableObject {
         }
         
         if foundAV {
-            antivirusStatus = SecurityStatus(
+            antivirusStatus = SecurityInfo(
                 isSecure: true,
                 details: "\(avName) Antivirus is installed",
                 recommendation: nil
             )
         } else {
-            antivirusStatus = SecurityStatus(
+            antivirusStatus = SecurityInfo(
                 isSecure: false,
                 details: "No antivirus software detected",
                 recommendation: "Consider installing antivirus software for better protection"
@@ -67,14 +71,14 @@ class SecurityStatusProvider: ObservableObject {
             let data = pipe.fileHandleForReading.readDataToEndOfFile()
             if let output = String(data: data, encoding: .utf8) {
                 let isEnabled = output.contains("enabled")
-                firewallStatus = SecurityStatus(
+                firewallStatus = SecurityInfo(
                     isSecure: isEnabled,
                     details: isEnabled ? "Firewall is enabled" : "Firewall is disabled",
                     recommendation: isEnabled ? nil : "Enable the firewall in System Settings > Network > Firewall"
                 )
             }
         } catch {
-            firewallStatus = SecurityStatus(
+            firewallStatus = SecurityInfo(
                 isSecure: false,
                 details: "Unable to check firewall status",
                 recommendation: "Check firewall settings manually in System Settings"
@@ -96,14 +100,14 @@ class SecurityStatusProvider: ObservableObject {
             let data = pipe.fileHandleForReading.readDataToEndOfFile()
             if let output = String(data: data, encoding: .utf8) {
                 let isEnabled = output.contains("FileVault is On")
-                diskEncryptionStatus = SecurityStatus(
+                diskEncryptionStatus = SecurityInfo(
                     isSecure: isEnabled,
                     details: isEnabled ? "FileVault is enabled" : "FileVault is disabled",
                     recommendation: isEnabled ? nil : "Enable FileVault in System Settings > Privacy & Security > FileVault"
                 )
             }
         } catch {
-            diskEncryptionStatus = SecurityStatus(
+            diskEncryptionStatus = SecurityInfo(
                 isSecure: false,
                 details: "Unable to check FileVault status",
                 recommendation: "Check FileVault settings manually in System Settings"

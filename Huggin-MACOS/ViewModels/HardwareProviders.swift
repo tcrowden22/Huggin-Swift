@@ -284,4 +284,21 @@ class ProcessMemoryInfoProvider: ObservableObject, @unchecked Sendable {
         
         self.processes = newProcesses
     }
+}
+
+@MainActor
+class HardwareProviders: ObservableObject {
+    @Published var usbDevicesProvider = USBDevicesProvider()
+    @Published var monitorsProvider = MonitorsProvider()
+    @Published var storageProvider = StorageProvider()
+    @Published var processMemoryInfoProvider = ProcessMemoryInfoProvider()
+    
+    func loadHardwareData() async {
+        // The individual providers handle their own loading via timers
+        // This method can be used for manual refresh if needed
+        await withTaskGroup(of: Void.self) { group in
+            // The providers are already running their own timers
+            // This is just a placeholder for any additional initialization
+        }
+    }
 } 

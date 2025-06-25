@@ -6,6 +6,7 @@ enum SidebarItem: String, CaseIterable, Identifiable {
     case software
     case system
     case scripts
+    case odin
     case support
     
     var id: String { rawValue }
@@ -17,6 +18,7 @@ enum SidebarItem: String, CaseIterable, Identifiable {
         case .software: return "Software"
         case .system: return "System Health"
         case .scripts: return "Scripts"
+        case .odin: return "ODIN Agent"
         case .support: return "Support"
         }
     }
@@ -28,6 +30,7 @@ enum SidebarItem: String, CaseIterable, Identifiable {
         case .software: return "app.badge"
         case .system: return "chart.line.uptrend.xyaxis"
         case .scripts: return "doc.text"
+        case .odin: return "network"
         case .support: return "bubble.left.and.bubble.right"
         }
     }
@@ -159,6 +162,8 @@ struct ContentView: View {
                     SystemHealthView(systemInfo: systemInfo)
                 case .scripts:
                     ScriptManagerView()
+                case .odin:
+                    OdinSettingsViewV3()
                 case .support:
                     SupportView(viewModel: supportViewModel)
                 }

@@ -71,8 +71,12 @@ class UpdateManagerService: ObservableObject {
     
     private func checkOSUpdates() async {
         do {
-            let softwareUpdates = try await softwareUpdateProvider.checkForUpdates()
-            osUpdates = softwareUpdates.map { $0.name }
+            let hasUpdates = try await softwareUpdateProvider.checkForUpdates()
+            if hasUpdates {
+                osUpdates = softwareUpdateProvider.updates.map { $0.name }
+            } else {
+                osUpdates = []
+            }
         } catch {
             errors.append("Failed to check OS updates: \(error.localizedDescription)")
         }

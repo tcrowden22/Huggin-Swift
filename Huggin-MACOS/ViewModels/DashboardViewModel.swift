@@ -101,10 +101,14 @@ public class DashboardViewModel: ObservableObject {
     @Published public var topProcessesByCPU: [ProcessInfo] = []
     @Published public var topProcessesByMemory: [ProcessInfo] = []
     @Published public var routingTable: [RouteInfo] = []
+    @Published public var totalProcesses: Int = 0
+    @Published public var systemUptime: String = ""
+    @Published public var availableSpace: String = ""
     
     // MARK: - Private Properties
     private nonisolated(unsafe) var updateTimer: Timer?
     private var cancellables = Set<AnyCancellable>()
+    private var isViewVisible = true
     
     // MARK: - Initialization
     public init() {
@@ -125,6 +129,7 @@ public class DashboardViewModel: ObservableObject {
             group.addTask { await self.updateMemoryUsage() }
             group.addTask { await self.updateDiskUsage() }
             group.addTask { await self.updateSMARTStatus() }
+            group.addTask { await self.updateSystemInfo() }
         }
         
         await MainActor.run {
@@ -162,10 +167,10 @@ public class DashboardViewModel: ObservableObject {
                                         let userRange = match.range(at: 1)
                                         let sysRange = match.range(at: 2)
                                         
-                                        if let userCPUStr = line.substring(with: userRange),
-                                           let sysCPUStr = line.substring(with: sysRange),
-                                           let userCPU = Double(userCPUStr),
-                                           let sysCPU = Double(sysCPUStr) {
+                                                                                if let userRange = Range(userRange, in: line),
+                                           let sysRange = Range(sysRange, in: line),
+                                           let userCPU = Double(String(line[userRange]).replacingOccurrences(of: "%", with: "")),
+                                           let sysCPU = Double(String(line[sysRange]).replacingOccurrences(of: "%", with: "")) {
                                             let totalUsage = (userCPU + sysCPU) / 100.0
                                             continuation.resume(returning: totalUsage)
                                             return
@@ -768,6 +773,138 @@ public class DashboardViewModel: ObservableObject {
         }
     }
 
+    private func updateSystemInfo() async {
+        let (processCount, uptime, diskSpace) = await withTaskGroup(of: (Int, String, String).self) { group in
+            group.addTask {
+                // Get total process count
+                let processCount = await self.getTotalProcessCount()
+                
+                // Get system uptime
+                let uptime = await self.getSystemUptime()
+                
+                // Get available disk space
+                let diskSpace = await self.getAvailableDiskSpace()
+                
+                return (processCount, uptime, diskSpace)
+            }
+            
+            for await result in group {
+                return result
+            }
+            
+            return (0, "", "")
+        }
+        
+        await MainActor.run {
+            self.totalProcesses = processCount
+            self.systemUptime = uptime
+            self.availableSpace = diskSpace
+        }
+    }
+    
+    private func getTotalProcessCount() async -> Int {
+        return await withCheckedContinuation { continuation in
+            Task.detached {
+                let process = Process()
+                process.launchPath = "/bin/ps"
+                process.arguments = ["ax"]
+                
+                let pipe = Pipe()
+                process.standardOutput = pipe
+                
+                do {
+                    try process.run()
+                    process.waitUntilExit()
+                    
+                    let data = pipe.fileHandleForReading.readDataToEndOfFile()
+                    if let output = String(data: data, encoding: .utf8) {
+                        let lines = output.components(separatedBy: .newlines)
+                        // Subtract 1 for header line
+                        let count = max(0, lines.count - 2)
+                        continuation.resume(returning: count)
+                    } else {
+                        continuation.resume(returning: 0)
+                    }
+                } catch {
+                    continuation.resume(returning: 0)
+                }
+            }
+        }
+    }
+    
+    private func getSystemUptime() async -> String {
+        return await withCheckedContinuation { continuation in
+            Task.detached {
+                let process = Process()
+                process.launchPath = "/usr/bin/uptime"
+                process.arguments = []
+                
+                let pipe = Pipe()
+                process.standardOutput = pipe
+                
+                do {
+                    try process.run()
+                    process.waitUntilExit()
+                    
+                    let data = pipe.fileHandleForReading.readDataToEndOfFile()
+                    if let output = String(data: data, encoding: .utf8) {
+                        // Parse uptime output like "10:14AM  up 2 days,  3:45, 2 users, load averages: 1.23 1.45 1.67"
+                        let components = output.components(separatedBy: ",")
+                        for component in components {
+                            let trimmed = component.trimmingCharacters(in: .whitespacesAndNewlines)
+                            if trimmed.contains("up ") {
+                                let uptimeStr = trimmed.replacingOccurrences(of: "up ", with: "")
+                                continuation.resume(returning: uptimeStr)
+                                return
+                            }
+                        }
+                        continuation.resume(returning: "Unknown")
+                    } else {
+                        continuation.resume(returning: "Unknown")
+                    }
+                } catch {
+                    continuation.resume(returning: "Unknown")
+                }
+            }
+        }
+    }
+    
+    private func getAvailableDiskSpace() async -> String {
+        return await withCheckedContinuation { continuation in
+            Task.detached {
+                let process = Process()
+                process.launchPath = "/bin/df"
+                process.arguments = ["-h", "/"]
+                
+                let pipe = Pipe()
+                process.standardOutput = pipe
+                
+                do {
+                    try process.run()
+                    process.waitUntilExit()
+                    
+                    let data = pipe.fileHandleForReading.readDataToEndOfFile()
+                    if let output = String(data: data, encoding: .utf8) {
+                        let lines = output.components(separatedBy: .newlines)
+                        if lines.count > 1 {
+                            let components = lines[1].components(separatedBy: .whitespacesAndNewlines).filter { !$0.isEmpty }
+                            if components.count >= 4 {
+                                let available = components[3]
+                                continuation.resume(returning: available)
+                                return
+                            }
+                        }
+                        continuation.resume(returning: "Unknown")
+                    } else {
+                        continuation.resume(returning: "Unknown")
+                    }
+                } catch {
+                    continuation.resume(returning: "Unknown")
+                }
+            }
+        }
+    }
+
     /// TODO: Load quick actions from configuration
     /// Should read script paths from app bundle or user preferences
     public func loadQuickActions() async {
@@ -788,7 +925,7 @@ public class DashboardViewModel: ObservableObject {
     // MARK: - Private Methods
     
     private func startPeriodicUpdates() {
-        updateTimer = Timer.scheduledTimer(withTimeInterval: 2.0, repeats: true) { [weak self] _ in
+        updateTimer = Timer.scheduledTimer(withTimeInterval: 5.0, repeats: true) { [weak self] _ in
             Task { @MainActor [weak self] in
                 guard let self = self else { 
                     self?.updateTimer?.invalidate()
@@ -809,7 +946,7 @@ public class DashboardViewModel: ObservableObject {
         Task {
             await updateMetrics()
             await fetchAlerts()
-            await checkForUpdates()
+            // Update checks are managed centrally - removed redundant call
             await fetchTickets()
             await monitorNetwork()
             await loadQuickActions()

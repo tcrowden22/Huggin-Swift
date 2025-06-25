@@ -287,20 +287,30 @@ public class ScriptManagerViewModel: ObservableObject {
                         scriptRef.isRunning = false
                         scriptRef.exitCode = process.terminationStatus
                         
-                        // Check for errors in output even if exit code is 0
-                        let hasErrorInOutput = scriptRef.output.lowercased().contains("error:") ||
-                                             scriptRef.output.lowercased().contains("stderr:") ||
-                                             scriptRef.output.lowercased().contains("failed")
+                        // Enhanced error detection in output
+                        let output = scriptRef.output.lowercased()
+                        let hasErrorInOutput = output.contains("error:") ||
+                                             output.contains("stderr:") ||
+                                             output.contains("failed") ||
+                                             output.contains("not found") ||
+                                             output.contains("no such file") ||
+                                             output.contains("permission denied") ||
+                                             output.contains("command not found") ||
+                                             output.contains("installation failed") ||
+                                             output.contains("unable to") ||
+                                             output.contains("cannot") ||
+                                             output.contains("does not exist") ||
+                                             output.contains("is not there")
                         
                         let statusMessage: String
                         if process.terminationStatus == 0 && !hasErrorInOutput {
-                            statusMessage = "\n\n--- Script completed successfully ---"
+                            statusMessage = "\n\n✅ Script completed successfully"
                         } else if process.terminationStatus == 0 && hasErrorInOutput {
-                            statusMessage = "\n\n--- Script completed with warnings/errors ---"
+                            statusMessage = "\n\n⚠️ Script completed with errors/warnings (exit code: 0, but errors detected in output)"
                             // Override exit code to indicate issues
                             scriptRef.exitCode = 1
                         } else {
-                            statusMessage = "\n\n--- Script failed with exit code \(process.terminationStatus) ---"
+                            statusMessage = "\n\n❌ Script failed with exit code \(process.terminationStatus)"
                         }
                         
                         scriptRef.output += statusMessage
@@ -342,7 +352,7 @@ public class ScriptManagerViewModel: ObservableObject {
         #!/bin/bash
         set -e
         
-        # Enhanced PATH setup for macOS app execution
+        # Enhanced PATH setup for macOS app execution - ensure Homebrew is found
         export PATH="/opt/homebrew/bin:/opt/homebrew/sbin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin:$PATH"
         
         # Set up environment variables
@@ -353,6 +363,24 @@ public class ScriptManagerViewModel: ObservableObject {
         command_exists() {
             command -v "$1" >/dev/null 2>&1
         }
+        
+        # Ensure Homebrew is accessible - override any script checks
+        if ! command_exists brew; then
+            if [ -f "/opt/homebrew/bin/brew" ]; then
+                export PATH="/opt/homebrew/bin:$PATH"
+                echo "✅ Found Homebrew at /opt/homebrew/bin/brew"
+            elif [ -f "/usr/local/bin/brew" ]; then
+                export PATH="/usr/local/bin:$PATH"
+                echo "✅ Found Homebrew at /usr/local/bin/brew"
+            else
+                echo "❌ Homebrew not found in common locations"
+                echo "Please install Homebrew first:"
+                echo "/bin/bash -c \"$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)\""
+                exit 127
+            fi
+        else
+            echo "✅ Homebrew is available at: $(which brew)"
+        fi
         
         # Debug information
         echo "=== Huginn Script Execution Environment ==="

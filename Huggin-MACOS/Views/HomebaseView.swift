@@ -87,9 +87,7 @@ struct HomebaseView: View {
             .padding()
         }
         .background(Color.clear)
-        .task {
-            _ = try? await updateProvider.checkForUpdates()
-        }
+        // Update checks are managed centrally
         .sheet(isPresented: $showUpdateModal) {
             UpdateDetailModal(
                 title: "System Updates",

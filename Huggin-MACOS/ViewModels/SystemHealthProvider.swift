@@ -2,12 +2,6 @@ import Foundation
 import SwiftUI
 import Charts
 
-struct DataPoint: Identifiable {
-    let id = UUID()
-    let time: Date
-    let value: Double
-}
-
 @MainActor
 class SystemHealthProvider: ObservableObject {
     @Published var healthStatus: SystemHealthStatus = .unknown
@@ -46,8 +40,9 @@ class SystemHealthProvider: ObservableObject {
     }
     
     private func startMonitoring() {
-        // Initial update
+        // Initial update with delay to avoid view update conflicts
         Task {
+            try? await Task.sleep(nanoseconds: 100_000_000) // 0.1 second delay
             await collectMetrics()
             await updateHealthStatus()
         }
@@ -62,68 +57,92 @@ class SystemHealthProvider: ObservableObject {
     }
     
     private func collectMetrics() async {
-        metrics = SystemMetrics(
-            cpuUsage: systemInfo.getCPUUsage(),
-            memoryUsage: systemInfo.getMemoryUsage(),
-            diskUsage: systemInfo.getDiskUsage(),
-            networkUsage: systemInfo.getNetworkUsage(),
-            batteryLevel: systemInfo.batteryLevel,
-            isCharging: systemInfo.isCharging
-        )
-        
+        // Collect all metrics first
+        let cpuUsage = systemInfo.getCPUUsage()
+        let memoryUsage = systemInfo.getMemoryUsage()
+        let diskUsage = systemInfo.getDiskUsage()
+        let networkUsage = systemInfo.getNetworkUsage()
         let now = Date()
         
-        // CPU Usage
-        let cpuUsage = systemInfo.getCPUUsage()
+        // Create new data points
         let cpuPoint = DataPoint(time: now, value: cpuUsage)
-        cpuHistory.append(cpuPoint)
-        if cpuHistory.count > maxDataPoints {
-            cpuHistory.removeFirst()
-        }
-        
-        // Memory Usage
-        let memoryUsage = systemInfo.getMemoryUsage()
         let memoryPoint = DataPoint(time: now, value: memoryUsage)
-        memoryHistory.append(memoryPoint)
-        if memoryHistory.count > maxDataPoints {
-            memoryHistory.removeFirst()
-        }
-        
-        // Network Usage
-        let networkUsage = systemInfo.getNetworkUsage()
         let networkPoint = DataPoint(time: now, value: networkUsage)
-        networkHistory.append(networkPoint)
-        if networkHistory.count > maxDataPoints {
-            networkHistory.removeFirst()
+        let diskPoint = DataPoint(time: now, value: diskUsage)
+        
+        // Update histories with proper array management
+        var newCpuHistory = cpuHistory
+        var newMemoryHistory = memoryHistory
+        var newNetworkHistory = networkHistory
+        var newDiskHistory = diskHistory
+        
+        newCpuHistory.append(cpuPoint)
+        newMemoryHistory.append(memoryPoint)
+        newNetworkHistory.append(networkPoint)
+        newDiskHistory.append(diskPoint)
+        
+        if newCpuHistory.count > maxDataPoints {
+            newCpuHistory.removeFirst()
+        }
+        if newMemoryHistory.count > maxDataPoints {
+            newMemoryHistory.removeFirst()
+        }
+        if newNetworkHistory.count > maxDataPoints {
+            newNetworkHistory.removeFirst()
+        }
+        if newDiskHistory.count > maxDataPoints {
+            newDiskHistory.removeFirst()
         }
         
-        // Disk Usage
-        let diskUsage = systemInfo.getDiskUsage()
-        let diskPoint = DataPoint(time: now, value: diskUsage)
-        diskHistory.append(diskPoint)
-        if diskHistory.count > maxDataPoints {
-            diskHistory.removeFirst()
+        // Batch update all published properties
+        await MainActor.run {
+            self.metrics = SystemMetrics(
+                cpuUsage: cpuUsage,
+                memoryUsage: memoryUsage,
+                diskUsage: diskUsage,
+                networkUsage: networkUsage,
+                batteryLevel: self.systemInfo.batteryLevel,
+                isCharging: self.systemInfo.isCharging
+            )
+            
+            self.cpuHistory = newCpuHistory
+            self.memoryHistory = newMemoryHistory
+            self.networkHistory = newNetworkHistory
+            self.diskHistory = newDiskHistory
         }
     }
     
     private func updateHealthStatus() async {
-        // Update individual component health
-        cpuHealth = determineHealth(usage: metrics.cpuUsage, warning: cpuWarningThreshold, critical: cpuCriticalThreshold)
-        memoryHealth = determineHealth(usage: metrics.memoryUsage, warning: memoryWarningThreshold, critical: memoryCriticalThreshold)
-        networkHealth = determineHealth(usage: metrics.networkUsage, warning: networkWarningThreshold, critical: networkCriticalThreshold)
-        diskHealth = determineHealth(usage: metrics.diskUsage, warning: diskWarningThreshold, critical: diskCriticalThreshold)
+        // Calculate health statuses
+        let newCpuHealth = determineHealth(usage: metrics.cpuUsage, warning: cpuWarningThreshold, critical: cpuCriticalThreshold)
+        let newMemoryHealth = determineHealth(usage: metrics.memoryUsage, warning: memoryWarningThreshold, critical: memoryCriticalThreshold)
+        let newNetworkHealth = determineHealth(usage: metrics.networkUsage, warning: networkWarningThreshold, critical: networkCriticalThreshold)
+        let newDiskHealth = determineHealth(usage: metrics.diskUsage, warning: diskWarningThreshold, critical: diskCriticalThreshold)
         
         // Determine overall health
-        let healthScores = [cpuHealth, memoryHealth, networkHealth, diskHealth]
+        let healthScores = [newCpuHealth, newMemoryHealth, newNetworkHealth, newDiskHealth]
+        let newOverallHealth: Huggin_MACOS.SystemHealth
+        let newHealthStatus: SystemHealthStatus
+        
         if healthScores.contains(.poor) {
-            overallHealth = .poor
-            healthStatus = .poor
+            newOverallHealth = .poor
+            newHealthStatus = .poor
         } else if healthScores.contains(.fair) {
-            overallHealth = .fair
-            healthStatus = .fair
+            newOverallHealth = .fair
+            newHealthStatus = .fair
         } else {
-            overallHealth = .good
-            healthStatus = .good
+            newOverallHealth = .good
+            newHealthStatus = .good
+        }
+        
+        // Batch update all health properties
+        await MainActor.run {
+            self.cpuHealth = newCpuHealth
+            self.memoryHealth = newMemoryHealth
+            self.networkHealth = newNetworkHealth
+            self.diskHealth = newDiskHealth
+            self.overallHealth = newOverallHealth
+            self.healthStatus = newHealthStatus
         }
     }
     
@@ -135,5 +154,10 @@ class SystemHealthProvider: ObservableObject {
         } else {
             return .good
         }
+    }
+    
+    func loadSystemHealth() async {
+        await collectMetrics()
+        await updateHealthStatus()
     }
 } 
